@@ -1,0 +1,38 @@
+{
+  "name": "x402-v2-demo",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "ts-node server.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@coinbase/cdp-sdk": "^1.40.1",
+    "@solana/kit": "^3.0.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.0.3",
+    "@x402/axios": "^2.1.0",
+    "@x402/core": "^2.1.0",
+    "@x402/evm": "^2.1.0",
+    "@x402/express": "^2.1.0",
+    "@x402/extensions": "^2.1.0",
+    "@x402/fetch": "^2.1.0",
+    "@x402/hono": "^2.1.0",
+    "@x402/next": "^2.1.0",
+    "@x402/paywall": "^2.1.0",
+    "@x402/svm": "^2.1.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "node-cache": "^5.1.2",
+    "stripe": "^20.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "viem": "^2.43.3",
+    "zod": "^3.25.76"
+  }
+}
