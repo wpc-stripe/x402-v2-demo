@@ -179,20 +179,44 @@ curl -H "payment-signature: <base64-encoded-signature>" \
 For automated testing with a wallet client, you can use the `@x402/fetch` library to handle the full payment flow:
 
 ```typescript
-import { x402Fetch } from '@x402/fetch';
-import { createWalletClient, http } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { base } from 'viem/chains';
+// Usage: ./node_modules/.bin/tsx client.ts
+// https://github.com/coinbase/x402/blob/main/docs/guides/migration-v1-to-v2.md
+import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
+import { registerExactEvmScheme } from "@x402/evm/exact/client";
+import { privateKeyToAccount } from "viem/accounts";
+import { webcrypto } from "crypto";
 
-const account = privateKeyToAccount('0x...');
-const walletClient = createWalletClient({
-  account,
-  chain: base,
-  transport: http(),
-});
+globalThis.crypto = webcrypto as any;
 
-const response = await x402Fetch('http://localhost:3000/api/data', {
-  walletClients: [walletClient],
+if (!process.env.EVM_PRIVATE_KEY) {
+  console.error("You must pass an EVM_PRIVATE_KEY to sign x402 requests")
+}
+
+const account = privateKeyToAccount(
+  process.env.EVM_PRIVATE_KEY
+);
+
+const client = new x402Client();
+registerExactEvmScheme(client, { signer: account });
+
+const fetchWithPay = wrapFetchWithPayment(fetch, client);
+
+async function main() {
+  const response = await fetchWithPay("http://localhost:3000/api/data", {
+    method: "GET",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `HTTP error! status: ${response.status} ${await response.text()}`
+    );
+  }
+  const body = await response.json();
+  console.log("Response from server:", body);
+}
+
+main().catch((error) => {
+  console.error("Error in client:", error);
+  process.exit(1);
 });
 ```
 
