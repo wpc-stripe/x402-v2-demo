@@ -163,6 +163,29 @@ async function createPaymentIntent(amountInCents: number) {
   return { paymentIntentId: paymentIntent.id, payToAddress };
 }
 
+/**
+ * Extracts and normalizes the 'to' address from a base64-encoded payment header
+ * @param paymentHeader - Base64-encoded payment signature header
+ * @returns Normalized lowercase address or undefined if extraction fails
+ */
+function extractToAddressFromPaymentHeader(
+  paymentHeader: string
+): string | undefined {
+  try {
+    const decoded = JSON.parse(Buffer.from(paymentHeader, "base64").toString());
+    const toAddress = decoded.payload?.authorization?.to;
+
+    if (toAddress && typeof toAddress === "string") {
+      return toAddress.toLowerCase();
+    }
+
+    return undefined;
+  } catch (e) {
+    console.error("Failed to decode payment header:", e);
+    return undefined;
+  }
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -186,23 +209,17 @@ app.use(
             payTo: async (context) => {
               // Check if this is a retry with an existing payment signature
               if (context.paymentHeader) {
-                try {
-                  const decoded = JSON.parse(
-                    Buffer.from(context.paymentHeader, "base64").toString()
-                  );
-                  const toAddress = decoded.payload?.authorization?.to;
+                const normalizedAddress = extractToAddressFromPaymentHeader(
+                  context.paymentHeader
+                );
 
-                  if (toAddress) {
-                    const normalizedAddress = toAddress.toLowerCase();
-                    const cached = paymentCache.get(normalizedAddress);
+                if (normalizedAddress) {
+                  const cached = paymentCache.get(normalizedAddress);
 
-                    if (cached) {
-                      // Reuse existing PaymentIntent address for payment retry
-                      return normalizedAddress as `0x${string}`;
-                    }
+                  if (cached) {
+                    // Reuse existing PaymentIntent address for payment retry
+                    return normalizedAddress as `0x${string}`;
                   }
-                } catch (e) {
-                  console.error("Failed to decode payment header:", e);
                 }
               }
 
@@ -259,15 +276,4 @@ app.get("/api/data", (_req: Request, res: Response) => {
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
-});
-
-// Handle unhandled promise rejections
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("⚠️  Unhandled Rejection at:", promise, "reason:", reason);
-});
-
-// Handle uncaught exceptions
-process.on("uncaughtException", (error) => {
-  console.error("⚠️  Uncaught Exception:", error);
-  process.exit(1);
 });
