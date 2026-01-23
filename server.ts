@@ -244,7 +244,7 @@ app.use(
             scheme: "exact",
             price: "$0.01",
             network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
-            payTo: process.env.SOLANA_PAY_TO!,
+            payTo: process.env.SOLANA_PAY_TO_ADDRESS!,
           },
         ],
         description: "Data retrieval endpoint",
