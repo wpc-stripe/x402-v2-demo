@@ -22,6 +22,7 @@ import { config } from "dotenv";
 import express, { Request, Response } from "express";
 import { paymentMiddleware, x402ResourceServer } from "@x402/express";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import Stripe from "stripe";
 import { generateJwt } from "@coinbase/cdp-sdk/auth";
@@ -64,7 +65,7 @@ const cdpApiKeySecret = process.env.CDP_API_KEY_SECRET;
 
 if (!cdpApiKeyId || !cdpApiKeySecret) {
   console.error(
-    "❌ CDP_KEY and CDP_API_KEY_SECRET environment variables are required"
+    "❌ CDP_KEY and CDP_API_KEY_SECRET environment variables are required",
   );
   process.exit(1);
 }
@@ -144,7 +145,7 @@ async function createPaymentIntent(amountInCents: number) {
     !("crypto_collect_deposit_details" in paymentIntent.next_action)
   ) {
     throw new Error(
-      "PaymentIntent did not return expected crypto deposit details"
+      "PaymentIntent did not return expected crypto deposit details",
     );
   }
 
@@ -157,7 +158,7 @@ async function createPaymentIntent(amountInCents: number) {
   console.log(
     `💳 Created PaymentIntent ${paymentIntent.id} for $${(
       amountInCents / 100
-    ).toFixed(2)} → ${payToAddress}`
+    ).toFixed(2)} → ${payToAddress}`,
   );
 
   return { paymentIntentId: paymentIntent.id, payToAddress };
@@ -169,7 +170,7 @@ async function createPaymentIntent(amountInCents: number) {
  * @returns Normalized lowercase address or undefined if extraction fails
  */
 function extractToAddressFromPaymentHeader(
-  paymentHeader: string
+  paymentHeader: string,
 ): string | undefined {
   try {
     const decoded = JSON.parse(Buffer.from(paymentHeader, "base64").toString());
@@ -210,7 +211,7 @@ app.use(
               // Check if this is a retry with an existing payment signature
               if (context.paymentHeader) {
                 const normalizedAddress = extractToAddressFromPaymentHeader(
-                  context.paymentHeader
+                  context.paymentHeader,
                 );
 
                 if (normalizedAddress) {
@@ -239,6 +240,12 @@ app.use(
               return payToAddress as `0x${string}`;
             },
           },
+          {
+            scheme: "exact",
+            price: "$0.01",
+            network: "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            payTo: process.env.SOLANA_PAY_TO!,
+          },
         ],
         description: "Data retrieval endpoint",
         mimeType: "application/json",
@@ -246,11 +253,18 @@ app.use(
     },
     new x402ResourceServer(facilitatorClient)
       .register("eip155:8453", new ExactEvmScheme())
+      .register("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", new ExactSvmScheme())
+      .onBeforeVerify(async (context) => {
+        console.log("🔍 Verifying payment...");
+      })
       .onAfterVerify(async (context) => {
         console.log(`✅ Payment verified from ${context.result.payer}`);
       })
       .onVerifyFailure(async (context) => {
         console.error("❌ Payment verification failed:", context.error);
+      })
+      .onBeforeSettle(async (context) => {
+        console.log("🔍 Settling payment...", JSON.stringify(context, null, 2));
       })
       .onAfterSettle(async (context) => {
         console.log(`✅ Payment settled: ${context.result.transaction}`);
@@ -259,8 +273,8 @@ app.use(
         console.error("❌ Payment settlement failed:", context.error);
       }),
     undefined,
-    paywall
-  )
+    paywall,
+  ),
 );
 
 app.get("/api/data", (_req: Request, res: Response) => {
