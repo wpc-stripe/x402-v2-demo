@@ -111,7 +111,7 @@ The server will run on `http://localhost:3000`.
 - **Lifecycle Hooks**:
   - `onAfterVerify`: Logs successful verification with payer address
   - `onVerifyFailure`: Logs verification errors
-  - `onAfterSettle`: Logs transaction hash after on-chain settlement
+  - `onAfterSettle`: Logs transaction hash after on-chain settlement and removes deposit address from cache
   - `onSettleFailure`: Logs settlement errors
 
 ## API Endpoints
@@ -292,10 +292,16 @@ const amountInCents = Number(10000) / Math.pow(10, decimals - 2);
   currency: "usd",
   payment_method_types: ["crypto"],
   payment_method_options: {
-    crypto: { mode: "custom" }       // Beta feature for custom networks
+    crypto: {
+      mode: "deposit",              // Deposit mode for stablecoin payments
+      deposit_options: {
+        networks: ["base"],         // Specify target deposit networks
+      },
+    },
   },
   confirm: true                       // Auto-confirm to get deposit address
 }
+// Requires apiVersion: "2026-03-04.preview"
 ```
 
 ### Address Normalization Fix
@@ -392,7 +398,7 @@ Your CDP API credentials are invalid or expired:
 
 1. ✅ `STRIPE_SECRET_KEY` is valid
 2. ✅ Stripe account has crypto payments enabled
-3. ✅ Using Stripe API version that supports crypto payments
+3. ✅ Using Stripe API version `2026-03-04.preview` or later (required for deposit mode)
 4. ✅ Network access to Stripe API
 
 ### Ed25519 Warning

@@ -26,7 +26,6 @@ import { ExactSvmScheme } from "@x402/svm/exact/server";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import Stripe from "stripe";
 import { generateJwt } from "@coinbase/cdp-sdk/auth";
-import crypto from "crypto";
 import { createPaywall } from "@x402/paywall";
 import { evmPaywall } from "@x402/paywall/evm";
 import NodeCache from "node-cache";
@@ -41,9 +40,6 @@ const paywall = createPaywall()
     testnet: false,
   })
   .build();
-
-// Make crypto available globally for CDP SDK
-globalThis.crypto = crypto.webcrypto as any;
 
 config();
 
@@ -124,35 +120,43 @@ const stripe = new Stripe(stripeSecretKey);
  * @returns PaymentIntent ID and deposit address
  */
 async function createPaymentIntent(amountInCents: number) {
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: amountInCents,
-    currency: "usd",
-    payment_method_types: ["crypto"],
-    payment_method_data: {
-      type: "crypto",
-    },
-    payment_method_options: {
-      crypto: {
-        // @ts-ignore - Stripe crypto payments beta feature
-        mode: "custom",
+  const paymentIntent = await stripe.paymentIntents.create(
+    {
+      amount: amountInCents,
+      currency: "usd",
+      payment_method_types: ["crypto"],
+      payment_method_data: {
+        type: "crypto",
       },
+      payment_method_options: {
+        crypto: {
+          // @ts-ignore - Stripe crypto payments deposit mode
+          mode: "deposit",
+          deposit_options: {
+            networks: ["base"],
+          },
+        },
+      },
+      confirm: true,
     },
-    confirm: true,
-  });
+    {
+      apiVersion: "2026-03-04.preview" as any,
+    },
+  );
 
   if (
     !paymentIntent.next_action ||
-    !("crypto_collect_deposit_details" in paymentIntent.next_action)
+    !("crypto_display_details" in paymentIntent.next_action)
   ) {
     throw new Error(
       "PaymentIntent did not return expected crypto deposit details",
     );
   }
 
-  // @ts-ignore - crypto_collect_deposit_details is a beta feature
-  const depositDetails = paymentIntent.next_action
-    .crypto_collect_deposit_details as any;
-  const payToAddress = depositDetails.deposit_addresses["base"]
+  // @ts-ignore - crypto_display_details is a preview API feature
+  const displayDetails = paymentIntent.next_action
+    .crypto_display_details as any;
+  const payToAddress = displayDetails.deposit_addresses["base"]
     .address as string;
 
   console.log(
@@ -187,6 +191,45 @@ function extractToAddressFromPaymentHeader(
   }
 }
 
+/**
+ * Gets an existing cached deposit address from a payment retry, or creates a new
+ * Stripe PaymentIntent and caches the resulting deposit address.
+ * @param paymentHeader - Optional base64-encoded payment header from a retry attempt
+ * @returns A Base deposit address
+ */
+async function getOrCreatePayToAddress(
+  paymentHeader?: string,
+): Promise<`0x${string}`> {
+  // Check if this is a retry with an existing payment signature
+  if (paymentHeader) {
+    const normalizedAddress = extractToAddressFromPaymentHeader(paymentHeader);
+
+    if (normalizedAddress) {
+      const cached = paymentCache.get(normalizedAddress);
+
+      if (cached) {
+        // Reuse existing PaymentIntent address for payment retry
+        return normalizedAddress as `0x${string}`;
+      }
+    }
+  }
+
+  // Create new Stripe PaymentIntent
+  const decimals = 6; // USDC has 6 decimals
+  const amountInCents = Number(10000) / Math.pow(10, decimals - 2);
+
+  const { payToAddress, paymentIntentId } =
+    await createPaymentIntent(amountInCents);
+
+  // Cache the PaymentIntent data (5 minute TTL from NodeCache config)
+  paymentCache.set(payToAddress.toLowerCase(), {
+    amount: amountInCents,
+    paymentIntentId: paymentIntentId,
+  });
+
+  return payToAddress as `0x${string}`;
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -201,44 +244,8 @@ app.use(
             scheme: "exact",
             price: "$0.01",
             network: "eip155:8453",
-            /**
-             * Dynamic payTo function that:
-             * 1. Checks if payment signature contains a cached deposit address
-             * 2. If cached, reuses the same address (for payment retries)
-             * 3. If not cached, creates a new Stripe PaymentIntent
-             */
-            payTo: async (context) => {
-              // Check if this is a retry with an existing payment signature
-              if (context.paymentHeader) {
-                const normalizedAddress = extractToAddressFromPaymentHeader(
-                  context.paymentHeader,
-                );
-
-                if (normalizedAddress) {
-                  const cached = paymentCache.get(normalizedAddress);
-
-                  if (cached) {
-                    // Reuse existing PaymentIntent address for payment retry
-                    return normalizedAddress as `0x${string}`;
-                  }
-                }
-              }
-
-              // Create new Stripe PaymentIntent
-              const decimals = 6; // USDC has 6 decimals
-              const amountInCents = Number(10000) / Math.pow(10, decimals - 2);
-
-              const { payToAddress, paymentIntentId } =
-                await createPaymentIntent(amountInCents);
-
-              // Cache the PaymentIntent data (5 minute TTL from NodeCache config)
-              paymentCache.set(payToAddress.toLowerCase(), {
-                amount: amountInCents,
-                paymentIntentId: paymentIntentId,
-              });
-
-              return payToAddress as `0x${string}`;
-            },
+            payTo: async (context) =>
+              getOrCreatePayToAddress(context.paymentHeader),
           },
           {
             scheme: "exact",
@@ -268,6 +275,7 @@ app.use(
       })
       .onAfterSettle(async (context) => {
         console.log(`✅ Payment settled: ${context.result.transaction}`);
+        paymentCache.del(context.requirements.payTo.toLowerCase());
       })
       .onSettleFailure(async (context) => {
         console.error("❌ Payment settlement failed:", context.error);
